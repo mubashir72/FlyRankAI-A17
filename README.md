@@ -55,5 +55,50 @@ For example, this deliberately omits the required `text` field:
 '{}' | curl.exe -X POST http://127.0.0.1:8000/triage -H "Content-Type: application/json" --data-binary '@-'
 ```
 
-The endpoint currently returns HTTP 503 when stub mode is disabled; the real
-model integration is a later stage.
+## Stage 2: prompt-file model integration
+
+The system prompt lives in [prompts/triage-v1.md](prompts/triage-v1.md). It
+defines the output contract, low-confidence behavior, and examples. The message
+is sent separately as a JSON-encoded user message, keeping untrusted content out
+of the system prompt. With `LLM_STUB` unset (or set to `0`), `/triage` calls the
+configured OpenAI-compatible provider using temperature `0.2`, a 30-second
+timeout, and up to two SDK retries. This stage returns the model's response text
+as-is; schema validation of real model output is a later stage.
+
+Because the local `.env` enables stub mode for safe development, temporarily
+turn it off in the server's PowerShell window before launching Uvicorn:
+
+```powershell
+$env:LLM_STUB = "0"
+uvicorn src.main:app --reload
+```
+
+Run these three real-input checks and inspect that the response is a JSON object
+with the job-card fields and allowed values:
+
+```powershell
+@'
+{"text":"I was charged twice for my monthly subscription."}
+'@ | curl.exe -X POST http://127.0.0.1:8000/triage -H "Content-Type: application/json" --data-binary '@-'
+
+@'
+{"text":"The app crashes every time I try to sign in."}
+'@ | curl.exe -X POST http://127.0.0.1:8000/triage -H "Content-Type: application/json" --data-binary '@-'
+
+@'
+{"text":"Something seems off with my account, but I am not sure what."}
+'@ | curl.exe -X POST http://127.0.0.1:8000/triage -H "Content-Type: application/json" --data-binary '@-'
+```
+
+After testing, restore stub mode for local development:
+
+```powershell
+Remove-Item Env:LLM_STUB
+```
+
+The three live checks returned JSON with the requested four fields. The
+duplicate charge was classified as `billing` with normal urgency, the sign-in
+crash as `bug` with high urgency, and the ambiguous account report as `other`
+with `0.3` confidence. The surprising part was that the vague account message
+did not trigger a confident guess: the model followed the low-confidence
+fallback rule.
