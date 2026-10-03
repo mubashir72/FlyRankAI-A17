@@ -62,8 +62,7 @@ defines the output contract, low-confidence behavior, and examples. The message
 is sent separately as a JSON-encoded user message, keeping untrusted content out
 of the system prompt. With `LLM_STUB` unset (or set to `0`), `/triage` calls the
 configured OpenAI-compatible provider using temperature `0.2`, a 30-second
-timeout, and up to two SDK retries. This stage returns the model's response text
-as-is; schema validation of real model output is a later stage.
+timeout, and up to two SDK retries.
 
 Because the local `.env` enables stub mode for safe development, temporarily
 turn it off in the server's PowerShell window before launching Uvicorn:
@@ -102,3 +101,19 @@ crash as `bug` with high urgency, and the ambiguous account report as `other`
 with `0.3` confidence. The surprising part was that the vague account message
 did not trigger a confident guess: the model followed the low-confidence
 fallback rule.
+
+## Stage 3: parse, validate, repair, or quarantine
+
+The API strips JSON code fences and extracts a JSON object from the response,
+then validates it against the strict Pydantic output schema. Invalid output gets
+exactly one repair call with the original prompt and input, the rejected answer,
+and its validation error. If that answer also fails validation, `/triage`
+returns HTTP 422 without exposing model text and appends both raw attempts, the
+input, error, and prompt version to `logs/quarantine.jsonl`. The quarantine log
+is ignored by Git because it may contain user-submitted text.
+
+Verification: a live duplicate-charge request returned a validated `billing`
+object. A controlled test then returned an unsupported category twice; the
+endpoint made exactly two calls total, returned 422 without either raw answer,
+and appended a `v1` record to `logs/quarantine.jsonl`. The invalid model output
+was simulated in the test rather than editing the committed prompt.

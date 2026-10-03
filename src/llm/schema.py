@@ -23,7 +23,7 @@ class TriageInput(BaseModel):
 
 
 class TriageOutput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     category: Category
     urgency: Urgency
