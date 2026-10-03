@@ -62,7 +62,7 @@ defines the output contract, low-confidence behavior, and examples. The message
 is sent separately as a JSON-encoded user message, keeping untrusted content out
 of the system prompt. With `LLM_STUB` unset (or set to `0`), `/triage` calls the
 configured OpenAI-compatible provider using temperature `0.2`, a 30-second
-timeout, and up to two SDK retries.
+timeout. Retry behavior is configured explicitly in Stage 4 below.
 
 Because the local `.env` enables stub mode for safe development, temporarily
 turn it off in the server's PowerShell window before launching Uvicorn:
@@ -117,3 +117,36 @@ object. A controlled test then returned an unsupported category twice; the
 endpoint made exactly two calls total, returned 422 without either raw answer,
 and appended a `v1` record to `logs/quarantine.jsonl`. The invalid model output
 was simulated in the test rather than editing the committed prompt.
+
+## Stage 4: retries, usage logs, and kill switch
+
+The OpenAI SDK's automatic retries are disabled (`max_retries=0`). The
+application retries only timeouts, HTTP 429, and HTTP 5xx, with at most three
+retries per provider request using exponential delays of 1, 2, and 4 seconds
+plus up to 250 ms of jitter. For HTTP 429 it honors a valid `Retry-After`
+header instead. HTTP 400, 401, and 403 are not retried; a provider credential
+rejection returns a clear 502 message.
+
+Each provider attempt writes one structured JSON log entry with the prompt
+version, model, input and output token counts, duration in milliseconds, whether
+a repair was needed, and the outcome. Attempts that fail before a model response
+have unavailable token counts and repair state set to `null`; successful
+responses include the provider's token counts.
+
+Set `LLM_ENABLED=false` to disable all model calls immediately. The endpoint
+returns a deterministic `other`/`normal` fallback with zero confidence; the
+kill switch takes precedence over stub and provider configuration. Enable it
+again with `LLM_ENABLED=true` or remove the variable.
+
+The kill switch can be tested without changing `.env`:
+
+```powershell
+$env:LLM_ENABLED = "false"
+uvicorn src.main:app --reload
+```
+
+The response is the fallback schema object, and no `llm_call` event is emitted.
+For a credential check, use a deliberately invalid key only in a local test
+environment: the provider's HTTP 401 is not retried, and the API returns 502
+with a message directing you to check the key. Restore your real key immediately
+afterwards; never paste a key into source control or logs.
