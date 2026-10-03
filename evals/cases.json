@@ -1,0 +1,42 @@
+[
+  {
+    "id": "duplicate-subscription-charge",
+    "text": "I was charged twice for my monthly subscription this morning.",
+    "expected_category": "billing"
+  },
+  {
+    "id": "refund-status",
+    "text": "I cancelled last week but have not received the refund for my latest payment.",
+    "expected_category": "billing"
+  },
+  {
+    "id": "login-crash",
+    "text": "The app crashes every time I try to sign in.",
+    "expected_category": "bug"
+  },
+  {
+    "id": "missing-export-button",
+    "text": "The export button disappeared after yesterday's update and now I cannot download reports.",
+    "expected_category": "bug"
+  },
+  {
+    "id": "dark-mode-request",
+    "text": "Could you add a dark mode option to the dashboard?",
+    "expected_category": "feature"
+  },
+  {
+    "id": "csv-export-request",
+    "text": "It would be useful if I could export my reports as CSV.",
+    "expected_category": "feature"
+  },
+  {
+    "id": "vague-account-problem",
+    "text": "Something seems off with my account, but I am not sure what.",
+    "expected_category": "other"
+  },
+  {
+    "id": "unclear-message",
+    "text": "Can someone take a look when they have time?",
+    "expected_category": "other"
+  }
+]

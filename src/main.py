@@ -33,8 +33,8 @@ RETRY_JITTER_SECONDS = 0.25
 @dataclass(frozen=True)
 class ModelCallResult:
     content: str
-    input_tokens: int
-    output_tokens: int
+    input_tokens: int | None
+    output_tokens: int | None
     duration_ms: int
 
 
@@ -281,8 +281,8 @@ def call_model(
 
     return ModelCallResult(
         content=content or "",
-        input_tokens=getattr(usage, "prompt_tokens", 0),
-        output_tokens=getattr(usage, "completion_tokens", 0),
+        input_tokens=getattr(usage, "prompt_tokens", None),
+        output_tokens=getattr(usage, "completion_tokens", None),
         duration_ms=duration_ms,
     )
 

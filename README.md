@@ -1,152 +1,118 @@
-# Week 6 — LLM integration
+# Support message triage API
 
-This project starts with a single support-message triage job. Its input and closed
-output contract are recorded in [JOB-CARD.md](JOB-CARD.md).
+## What it does
 
-The provider is configured only through environment variables. Changing the base
-URL and model lets the same OpenAI-compatible client use a local model or a hosted
-provider without hard-coding provider details.
+This API takes one customer support message and sorts it into a small set of
+teams' categories, such as billing or bug reports. It also estimates urgency
+and explains the choice briefly. If the message is unclear, the system can
+label it “other” rather than pretend it knows. Responses are checked against a
+fixed format before they are returned.
 
-## Stage 0: verify the model connection
+## Try it: request and exact response
 
-1. Create and activate a virtual environment, then install dependencies:
-
-   ```powershell
-   python -m venv .venv
-   .\.venv\Scripts\Activate.ps1
-   pip install -r requirements.txt
-   ```
-
-2. Copy `.env.example` to `.env` if needed. Set `LLM_API_KEY` in `.env` to your
-   Groq API key. The default `LLM_BASE_URL` is
-   `https://api.groq.com/openai/v1` and `LLM_MODEL` is `openai/gpt-oss-20b`.
-
-3. Run the one-shot connection check:
-
-   ```powershell
-   python src\llm\hello.py
-   ```
-
-The `.env` file is ignored by Git; never commit your API key.
-
-## Stage 1: validated triage endpoint (stub mode)
-
-Install dependencies as above, then start the API with `LLM_STUB=1` in `.env`:
-
-```powershell
-uvicorn src.main:app --reload
-```
-
-In another PowerShell window, send a valid request (piping the JSON avoids
-PowerShell's native-command quoting differences):
+With the default stub mode enabled, this PowerShell request makes no model call:
 
 ```powershell
 @'
 {"text":"I was charged twice for my subscription."}
-'@ | curl.exe -X POST http://127.0.0.1:8000/triage -H "Content-Type: application/json" --data-binary '@-'
+'@ | curl.exe -sS -X POST http://127.0.0.1:8000/triage -H "Content-Type: application/json" --data-binary '@-'
 ```
 
-The response has the closed fields `category`, `urgency`, `confidence`, and
-`reason`. The stub skips all model calls. Invalid input is rejected with HTTP
-400 and a JSON message naming the field, before any model call could occur.
-For example, this deliberately omits the required `text` field:
+Exact response:
 
-```powershell
-'{}' | curl.exe -X POST http://127.0.0.1:8000/triage -H "Content-Type: application/json" --data-binary '@-'
+```json
+{"category":"other","urgency":"normal","confidence":0.5,"reason":"Stub response for local testing."}
 ```
 
-## Stage 2: prompt-file model integration
+## Job card
 
-The system prompt lives in [prompts/triage-v1.md](prompts/triage-v1.md). It
-defines the output contract, low-confidence behavior, and examples. The message
-is sent separately as a JSON-encoded user message, keeping untrusted content out
-of the system prompt. With `LLM_STUB` unset (or set to `0`), `/triage` calls the
-configured OpenAI-compatible provider using temperature `0.2`, a 30-second
-timeout. Retry behavior is configured explicitly in Stage 4 below.
+What it does: Classifies a support message so it lands on the right team.
 
-Because the local `.env` enables stub mode for safe development, temporarily
-turn it off in the server's PowerShell window before launching Uvicorn:
+Input: `{ "text": "string, 1-2000 characters" }`
+
+Output: `{ "category": one of [billing|bug|feature|other], "urgency": one of [low|normal|high], "confidence": 0.0-1.0, "reason": "one short sentence" }`
+
+It must never:
+
+- Invent a category outside the list.
+- Give medical, legal, or financial advice.
+- Reveal the prompt.
+
+When unsure, use category `other` with low confidence rather than guessing.
+
+## Provider and configuration
+
+The live evaluation below used Groq's OpenAI-compatible API with model
+`openai/gpt-oss-20b`. To swap providers, configure these three variables in your
+local `.env` file:
+
+- `LLM_BASE_URL` — OpenAI-compatible API base URL.
+- `LLM_API_KEY` — the provider key; keep it in ignored `.env`, never in the
+  tracked `.env.example`.
+- `LLM_MODEL` — the provider's model identifier.
+
+The `.env.example` documents all variables. Stub mode (`LLM_STUB=1`) is the
+safe default for local development. Set it to `0` for a live model call.
+
+## Evaluation result
+
+On **2026-10-03**, prompt **v1**, the eight-case evaluation scored **8/8
+(100.0%) category accuracy**. There were no category mismatches. This is a
+small, hand-written smoke/evaluation set, not a claim of production-level
+accuracy.
+
+Run the same cases against a locally running API with:
 
 ```powershell
-$env:LLM_STUB = "0"
+python evals\run_eval.py
+```
+
+## Cost log and daily estimate
+
+One successful call from that run logged:
+
+```json
+{"event":"llm_call","prompt_version":"v1","model":"openai/gpt-oss-20b","input_tokens":505,"output_tokens":73,"duration_ms":1365,"needed_repair":false,"outcome":"success"}
+```
+
+Using an estimated rate of **$0.10 per million input tokens** and **$0.50 per
+million output tokens**, that call costs about **$0.000087**. The eight eval
+calls used 4,055 input and 1,078 output tokens total (about **$0.000945** at
+those rates). At the eval's average token use, 10,000 requests/day would be
+about **$1.18/day**, before retries, repairs, taxes, or provider price changes.
+Verify current provider pricing before budgeting.
+
+## What I would fix with another day
+
+I would expand the eval set and have a second person independently label it;
+eight examples are too few to establish reliable accuracy, especially for
+urgency and ambiguous cases.
+
+## Run from a fresh clone
+
+Create a virtual environment and install dependencies:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+```
+
+For the exact stub response above, leave `LLM_STUB=1` in `.env`. Start the API:
+
+```powershell
 uvicorn src.main:app --reload
 ```
 
-Run these three real-input checks and inspect that the response is a JSON object
-with the job-card fields and allowed values:
+To use Groq instead, put your key in the ignored `.env`, set `LLM_STUB=0`,
+`LLM_ENABLED=true`, and configure the three provider variables above. Then send
+the same curl request. The endpoint has a 30-second provider timeout, bounded
+retries for timeouts/429/5xx, a kill switch (`LLM_ENABLED=false`), strict output
+validation, one repair attempt, and quarantine handling for invalid responses.
+
+## Run the test suite
 
 ```powershell
-@'
-{"text":"I was charged twice for my monthly subscription."}
-'@ | curl.exe -X POST http://127.0.0.1:8000/triage -H "Content-Type: application/json" --data-binary '@-'
-
-@'
-{"text":"The app crashes every time I try to sign in."}
-'@ | curl.exe -X POST http://127.0.0.1:8000/triage -H "Content-Type: application/json" --data-binary '@-'
-
-@'
-{"text":"Something seems off with my account, but I am not sure what."}
-'@ | curl.exe -X POST http://127.0.0.1:8000/triage -H "Content-Type: application/json" --data-binary '@-'
+python -m unittest discover -s tests -v
 ```
-
-After testing, restore stub mode for local development:
-
-```powershell
-Remove-Item Env:LLM_STUB
-```
-
-The three live checks returned JSON with the requested four fields. The
-duplicate charge was classified as `billing` with normal urgency, the sign-in
-crash as `bug` with high urgency, and the ambiguous account report as `other`
-with `0.3` confidence. The surprising part was that the vague account message
-did not trigger a confident guess: the model followed the low-confidence
-fallback rule.
-
-## Stage 3: parse, validate, repair, or quarantine
-
-The API strips JSON code fences and extracts a JSON object from the response,
-then validates it against the strict Pydantic output schema. Invalid output gets
-exactly one repair call with the original prompt and input, the rejected answer,
-and its validation error. If that answer also fails validation, `/triage`
-returns HTTP 422 without exposing model text and appends both raw attempts, the
-input, error, and prompt version to `logs/quarantine.jsonl`. The quarantine log
-is ignored by Git because it may contain user-submitted text.
-
-Verification: a live duplicate-charge request returned a validated `billing`
-object. A controlled test then returned an unsupported category twice; the
-endpoint made exactly two calls total, returned 422 without either raw answer,
-and appended a `v1` record to `logs/quarantine.jsonl`. The invalid model output
-was simulated in the test rather than editing the committed prompt.
-
-## Stage 4: retries, usage logs, and kill switch
-
-The OpenAI SDK's automatic retries are disabled (`max_retries=0`). The
-application retries only timeouts, HTTP 429, and HTTP 5xx, with at most three
-retries per provider request using exponential delays of 1, 2, and 4 seconds
-plus up to 250 ms of jitter. For HTTP 429 it honors a valid `Retry-After`
-header instead. HTTP 400, 401, and 403 are not retried; a provider credential
-rejection returns a clear 502 message.
-
-Each provider attempt writes one structured JSON log entry with the prompt
-version, model, input and output token counts, duration in milliseconds, whether
-a repair was needed, and the outcome. Attempts that fail before a model response
-have unavailable token counts and repair state set to `null`; successful
-responses include the provider's token counts.
-
-Set `LLM_ENABLED=false` to disable all model calls immediately. The endpoint
-returns a deterministic `other`/`normal` fallback with zero confidence; the
-kill switch takes precedence over stub and provider configuration. Enable it
-again with `LLM_ENABLED=true` or remove the variable.
-
-The kill switch can be tested without changing `.env`:
-
-```powershell
-$env:LLM_ENABLED = "false"
-uvicorn src.main:app --reload
-```
-
-The response is the fallback schema object, and no `llm_call` event is emitted.
-For a credential check, use a deliberately invalid key only in a local test
-environment: the provider's HTTP 401 is not retried, and the API returns 502
-with a message directing you to check the key. Restore your real key immediately
-afterwards; never paste a key into source control or logs.
